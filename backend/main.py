@@ -247,21 +247,26 @@ async def create_user(user_data: schemas.UserCreate, current_user: models.User =
     verification_token = email_service.generate_verification_token()
     token_expiry = email_service.get_token_expiry()
     
-    # Create new user
-    db_user = models.User(
-        email=user_data.email,
-        hashed_password=get_password_hash(user_data.password),
-        full_name=user_data.full_name,
-        role=user_data.role,
-        manager_id=user_data.manager_id,
-        is_verified=False,
-        verification_token=verification_token,
-        verification_token_expires=token_expiry
-    )
+    @retry_db_operation_with_new_session(max_retries=3, delay=0.1)
+    def create_user_with_retry(fresh_db):
+        # Create new user
+        db_user = models.User(
+            email=user_data.email,
+            hashed_password=get_password_hash(user_data.password),
+            full_name=user_data.full_name,
+            role=user_data.role,
+            manager_id=user_data.manager_id,
+            is_verified=False,
+            verification_token=verification_token,
+            verification_token_expires=token_expiry
+        )
+        
+        fresh_db.add(db_user)
+        fresh_db.commit()
+        fresh_db.refresh(db_user)
+        return db_user
     
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
+    db_user = create_user_with_retry()
     
     # Send verification email
     try:
@@ -350,37 +355,61 @@ def update_feedback(feedback_id: int, feedback_update: schemas.FeedbackUpdate, c
     if current_user.role != "manager":
         raise HTTPException(status_code=403, detail="Only managers can update feedback")
     
+    # Verify feedback exists and belongs to current user
     db_feedback = db.query(models.Feedback).filter(models.Feedback.id == feedback_id, models.Feedback.manager_id == current_user.id).first()
     if not db_feedback:
         raise HTTPException(status_code=404, detail="Feedback not found")
     
-    update_data = feedback_update.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        if field != "tag_ids":
-            setattr(db_feedback, field, value)
+    @retry_db_operation_with_new_session(max_retries=3, delay=0.1)
+    def update_feedback_with_retry(fresh_db):
+        # Re-fetch the feedback in the new session
+        feedback_to_update = fresh_db.query(models.Feedback).filter(
+            models.Feedback.id == feedback_id, 
+            models.Feedback.manager_id == current_user.id
+        ).first()
+        
+        if not feedback_to_update:
+            raise HTTPException(status_code=404, detail="Feedback not found")
+        
+        update_data = feedback_update.dict(exclude_unset=True)
+        for field, value in update_data.items():
+            if field != "tag_ids":
+                setattr(feedback_to_update, field, value)
+        
+        if feedback_update.tag_ids is not None:
+            tags = fresh_db.query(models.Tag).filter(models.Tag.id.in_(feedback_update.tag_ids)).all()
+            feedback_to_update.tags = tags
+        
+        fresh_db.commit()
+        fresh_db.refresh(feedback_to_update)
+        return feedback_to_update
     
-    if feedback_update.tag_ids is not None:
-        tags = db.query(models.Tag).filter(models.Tag.id.in_(feedback_update.tag_ids)).all()
-        db_feedback.tags = tags
-    
-    db.commit()
-    db.refresh(db_feedback)
-    return db_feedback
+    return update_feedback_with_retry()
 
 @app.post("/feedback/{feedback_id}/acknowledge")
 def acknowledge_feedback(feedback_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     if current_user.role != "employee":
         raise HTTPException(status_code=403, detail="Only employees can acknowledge feedback")
     
+    # Verify feedback exists and belongs to current user
     db_feedback = db.query(models.Feedback).filter(models.Feedback.id == feedback_id, models.Feedback.employee_id == current_user.id).first()
     if not db_feedback:
         raise HTTPException(status_code=404, detail="Feedback not found")
     
-    @retry_db_operation(max_retries=3, delay=0.1)
-    def acknowledge_with_retry():
-        db_feedback.acknowledged = True
-        db_feedback.acknowledged_at = datetime.utcnow()
-        db.commit()
+    @retry_db_operation_with_new_session(max_retries=3, delay=0.1)
+    def acknowledge_with_retry(fresh_db):
+        # Re-fetch the feedback in the new session
+        feedback_to_update = fresh_db.query(models.Feedback).filter(
+            models.Feedback.id == feedback_id, 
+            models.Feedback.employee_id == current_user.id
+        ).first()
+        
+        if not feedback_to_update:
+            raise HTTPException(status_code=404, detail="Feedback not found")
+        
+        feedback_to_update.acknowledged = True
+        feedback_to_update.acknowledged_at = datetime.utcnow()
+        fresh_db.commit()
         return {"message": "Feedback acknowledged"}
     
     return acknowledge_with_retry()
@@ -407,14 +436,18 @@ def create_feedback_request(request: schemas.FeedbackRequestCreate, current_user
     if current_user.role != "employee":
         raise HTTPException(status_code=403, detail="Only employees can request feedback")
     
-    db_request = models.FeedbackRequest(
-        employee_id=current_user.id,
-        message=request.message
-    )
-    db.add(db_request)
-    db.commit()
-    db.refresh(db_request)
-    return db_request
+    @retry_db_operation_with_new_session(max_retries=3, delay=0.1)
+    def create_request_with_retry(fresh_db):
+        db_request = models.FeedbackRequest(
+            employee_id=current_user.id,
+            message=request.message
+        )
+        fresh_db.add(db_request)
+        fresh_db.commit()
+        fresh_db.refresh(db_request)
+        return db_request
+    
+    return create_request_with_retry()
 
 @app.get("/feedback-requests", response_model=list[schemas.FeedbackRequest])
 def get_feedback_requests(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
