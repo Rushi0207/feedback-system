@@ -2,11 +2,13 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 import jwt
 import os
 import secrets
+import time
 from passlib.context import CryptContext
 from dotenv import load_dotenv
 import database
@@ -16,6 +18,30 @@ from email_service import email_service
 
 # Load environment variables
 load_dotenv()
+
+# Database retry decorator with session management
+def retry_db_operation_with_new_session(max_retries=3, delay=0.1):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                # Create a new database session for each attempt
+                db = database.SessionLocal()
+                try:
+                    result = func(db, *args, **kwargs)
+                    db.close()
+                    return result
+                except (OperationalError, Exception) as e:
+                    db.rollback()
+                    db.close()
+                    last_exception = e
+                    if ("database is locked" in str(e) or "PendingRollbackError" in str(e)) and attempt < max_retries - 1:
+                        time.sleep(delay * (2 ** attempt))  # Exponential backoff
+                        continue
+                    raise e
+            raise last_exception
+        return wrapper
+    return decorator
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -285,24 +311,28 @@ def create_feedback(feedback: schemas.FeedbackCreate, current_user: models.User 
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found in your team")
     
-    db_feedback = models.Feedback(
-        manager_id=current_user.id,
-        employee_id=feedback.employee_id,
-        strengths=feedback.strengths,
-        areas_to_improve=feedback.areas_to_improve,
-        sentiment=feedback.sentiment
-    )
-    db.add(db_feedback)
-    db.commit()
-    db.refresh(db_feedback)
+    @retry_db_operation_with_new_session(max_retries=3, delay=0.1)
+    def create_feedback_with_retry(fresh_db):
+        db_feedback = models.Feedback(
+            manager_id=current_user.id,
+            employee_id=feedback.employee_id,
+            strengths=feedback.strengths,
+            areas_to_improve=feedback.areas_to_improve,
+            sentiment=feedback.sentiment
+        )
+        fresh_db.add(db_feedback)
+        fresh_db.commit()
+        fresh_db.refresh(db_feedback)
+        
+        # Add tags if provided
+        if feedback.tag_ids:
+            tags = fresh_db.query(models.Tag).filter(models.Tag.id.in_(feedback.tag_ids)).all()
+            db_feedback.tags = tags
+            fresh_db.commit()
+        
+        return db_feedback
     
-    # Add tags if provided
-    if feedback.tag_ids:
-        tags = db.query(models.Tag).filter(models.Tag.id.in_(feedback.tag_ids)).all()
-        db_feedback.tags = tags
-        db.commit()
-    
-    return db_feedback
+    return create_feedback_with_retry()
 
 @app.get("/feedback", response_model=list[schemas.Feedback])
 def get_feedback(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -346,11 +376,14 @@ def acknowledge_feedback(feedback_id: int, current_user: models.User = Depends(g
     if not db_feedback:
         raise HTTPException(status_code=404, detail="Feedback not found")
     
-    db_feedback.acknowledged = True
-    db_feedback.acknowledged_at = datetime.utcnow()
-    db.commit()
+    @retry_db_operation(max_retries=3, delay=0.1)
+    def acknowledge_with_retry():
+        db_feedback.acknowledged = True
+        db_feedback.acknowledged_at = datetime.utcnow()
+        db.commit()
+        return {"message": "Feedback acknowledged"}
     
-    return {"message": "Feedback acknowledged"}
+    return acknowledge_with_retry()
 
 # Tags routes
 @app.get("/tags", response_model=list[schemas.Tag])

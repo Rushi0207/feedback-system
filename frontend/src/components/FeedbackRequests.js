@@ -1,44 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
+import { useDispatch } from 'react-redux';
+import { useAuthStatus, useFeedback } from '../store/hooks';
+import { fetchFeedbackRequests, createFeedbackRequest } from '../store/slices/feedbackSlice';
+import { addNotification } from '../store/slices/uiSlice';
+import LoadingSpinner from './LoadingSpinner';
 
 function FeedbackRequests() {
-  const { user } = useAuth();
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuthStatus();
+  const { feedbackRequests, requestsLoading } = useFeedback();
+  const dispatch = useDispatch();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newRequest, setNewRequest] = useState({ message: '' });
-  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetchRequests();
-  }, []);
+    dispatch(fetchFeedbackRequests());
+  }, [dispatch]);
 
-  const fetchRequests = async () => {
-    try {
-      const response = await axios.get('/feedback-requests');
-      setRequests(response.data);
-    } catch (error) {
-      console.error('Error fetching feedback requests:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const createRequest = async (e) => {
+  const handleCreateRequest = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
 
-    try {
-      const response = await axios.post('/feedback-requests', newRequest);
-      setRequests([response.data, ...requests]);
+    const result = await dispatch(createFeedbackRequest(newRequest));
+    
+    if (createFeedbackRequest.fulfilled.match(result)) {
       setNewRequest({ message: '' });
       setShowCreateForm(false);
-    } catch (error) {
-      console.error('Error creating feedback request:', error);
-      alert('Error creating request. Please try again.');
-    } finally {
-      setSubmitting(false);
+      dispatch(addNotification({
+        type: 'success',
+        message: 'Feedback request sent successfully!'
+      }));
+    } else {
+      dispatch(addNotification({
+        type: 'error',
+        message: result.payload || 'Error creating request. Please try again.'
+      }));
     }
   };
 
@@ -60,12 +54,8 @@ function FeedbackRequests() {
     });
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-indigo-500"></div>
-      </div>
-    );
+  if (requestsLoading) {
+    return <LoadingSpinner message="Loading feedback requests..." />;
   }
 
   return (
@@ -88,7 +78,7 @@ function FeedbackRequests() {
         {showCreateForm && (
           <div className="bg-white shadow-lg rounded-lg p-6 mb-6">
             <h2 className="text-lg font-medium text-gray-900 mb-4">Request Feedback</h2>
-            <form onSubmit={createRequest}>
+            <form onSubmit={handleCreateRequest}>
               <div className="mb-4">
                 <label htmlFor="message" className="block text-sm font-medium text-gray-700 mb-2">
                   Message to your manager
@@ -113,17 +103,16 @@ function FeedbackRequests() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md font-medium disabled:opacity-50"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md font-medium"
                 >
-                  {submitting ? 'Sending...' : 'Send Request'}
+                  Send Request
                 </button>
               </div>
             </form>
           </div>
         )}
 
-        {requests.length === 0 ? (
+        {feedbackRequests.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-500 text-lg">
               {user?.role === 'manager' 
@@ -135,7 +124,7 @@ function FeedbackRequests() {
         ) : (
           <div className="bg-white shadow overflow-hidden sm:rounded-md">
             <ul className="divide-y divide-gray-200">
-              {requests.map((request) => (
+              {feedbackRequests.map((request) => (
                 <li key={request.id} className="px-6 py-4">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">

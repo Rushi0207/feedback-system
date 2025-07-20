@@ -1,65 +1,74 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
+import React, { useEffect } from 'react';
+import { useDispatch } from 'react-redux';
+import { useAuthStatus, useFeedback, useUI } from '../store/hooks';
+import { fetchFeedback, updateFeedback, acknowledgeFeedback, optimisticAcknowledge, rollbackAcknowledge } from '../store/slices/feedbackSlice';
+import { setEditingFeedback, clearEditingFeedback, updateEditingForm, addNotification } from '../store/slices/uiSlice';
 import ReactMarkdown from 'react-markdown';
+import LoadingSpinner from './LoadingSpinner';
 
 function FeedbackList() {
-  const { user } = useAuth();
-  const [feedback, setFeedback] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({});
+  const { user } = useAuthStatus();
+  const { feedback, loading } = useFeedback();
+  const { editingFeedbackId, editingUserForm } = useUI();
+  const dispatch = useDispatch();
 
   useEffect(() => {
-    fetchFeedback();
-  }, []);
+    dispatch(fetchFeedback());
+  }, [dispatch]);
 
-  const fetchFeedback = async () => {
-    try {
-      const response = await axios.get('/feedback');
-      setFeedback(response.data);
-    } catch (error) {
-      console.error('Error fetching feedback:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const acknowledgeFeedback = async (feedbackId) => {
-    try {
-      await axios.post(`/feedback/${feedbackId}/acknowledge`);
-      setFeedback(feedback.map(f => 
-        f.id === feedbackId 
-          ? { ...f, acknowledged: true, acknowledged_at: new Date().toISOString() }
-          : f
-      ));
-    } catch (error) {
-      console.error('Error acknowledging feedback:', error);
+  const handleAcknowledgeFeedback = async (feedbackId) => {
+    // Optimistic update
+    dispatch(optimisticAcknowledge(feedbackId));
+    
+    const result = await dispatch(acknowledgeFeedback(feedbackId));
+    
+    if (acknowledgeFeedback.rejected.match(result)) {
+      // Rollback on error
+      dispatch(rollbackAcknowledge(feedbackId));
+      dispatch(addNotification({
+        type: 'error',
+        message: result.payload || 'Failed to acknowledge feedback'
+      }));
+    } else {
+      dispatch(addNotification({
+        type: 'success',
+        message: 'Feedback acknowledged successfully!'
+      }));
     }
   };
 
   const startEditing = (feedbackItem) => {
-    setEditingId(feedbackItem.id);
-    setEditForm({
-      strengths: feedbackItem.strengths,
-      areas_to_improve: feedbackItem.areas_to_improve,
-      sentiment: feedbackItem.sentiment
-    });
+    dispatch(setEditingFeedback({
+      id: feedbackItem.id,
+      data: {
+        strengths: feedbackItem.strengths,
+        areas_to_improve: feedbackItem.areas_to_improve,
+        sentiment: feedbackItem.sentiment
+      }
+    }));
   };
 
   const cancelEditing = () => {
-    setEditingId(null);
-    setEditForm({});
+    dispatch(clearEditingFeedback());
   };
 
   const saveFeedback = async (feedbackId) => {
-    try {
-      const response = await axios.put(`/feedback/${feedbackId}`, editForm);
-      setFeedback(feedback.map(f => f.id === feedbackId ? response.data : f));
-      setEditingId(null);
-      setEditForm({});
-    } catch (error) {
-      console.error('Error updating feedback:', error);
+    const result = await dispatch(updateFeedback({
+      id: feedbackId,
+      updateData: editingUserForm
+    }));
+    
+    if (updateFeedback.fulfilled.match(result)) {
+      dispatch(clearEditingFeedback());
+      dispatch(addNotification({
+        type: 'success',
+        message: 'Feedback updated successfully!'
+      }));
+    } else {
+      dispatch(addNotification({
+        type: 'error',
+        message: result.payload || 'Failed to update feedback'
+      }));
     }
   };
 
@@ -82,11 +91,7 @@ function FeedbackList() {
   };
 
   if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-indigo-500"></div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading feedback..." />;
   }
 
   return (
@@ -137,15 +142,15 @@ function FeedbackList() {
                 </div>
 
                 <div className="px-6 py-4">
-                  {editingId === item.id ? (
+                  {editingFeedbackId === item.id ? (
                     <div className="space-y-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           Strengths
                         </label>
                         <textarea
-                          value={editForm.strengths}
-                          onChange={(e) => setEditForm({...editForm, strengths: e.target.value})}
+                          value={editingUserForm.strengths || ''}
+                          onChange={(e) => dispatch(updateEditingForm({strengths: e.target.value}))}
                           rows={3}
                           className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                         />
@@ -155,8 +160,8 @@ function FeedbackList() {
                           Areas to Improve
                         </label>
                         <textarea
-                          value={editForm.areas_to_improve}
-                          onChange={(e) => setEditForm({...editForm, areas_to_improve: e.target.value})}
+                          value={editingUserForm.areas_to_improve || ''}
+                          onChange={(e) => dispatch(updateEditingForm({areas_to_improve: e.target.value}))}
                           rows={3}
                           className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                         />
@@ -166,8 +171,8 @@ function FeedbackList() {
                           Sentiment
                         </label>
                         <select
-                          value={editForm.sentiment}
-                          onChange={(e) => setEditForm({...editForm, sentiment: e.target.value})}
+                          value={editingUserForm.sentiment || 'positive'}
+                          onChange={(e) => dispatch(updateEditingForm({sentiment: e.target.value}))}
                           className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                         >
                           <option value="positive">Positive</option>
@@ -232,7 +237,7 @@ function FeedbackList() {
                       </p>
                     ) : (
                       <button
-                        onClick={() => acknowledgeFeedback(item.id)}
+                        onClick={() => handleAcknowledgeFeedback(item.id)}
                         className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium"
                       >
                         Acknowledge Feedback

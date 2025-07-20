@@ -1,34 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
+import React, { useEffect } from 'react';
+import { useDispatch } from 'react-redux';
 import { Link } from 'react-router-dom';
+import { useAuthStatus, useDashboard, useFeedback } from '../store/hooks';
+import { fetchDashboardStats } from '../store/slices/dashboardSlice';
+import { fetchFeedback } from '../store/slices/feedbackSlice';
+import LoadingSpinner from './LoadingSpinner';
 
 function Dashboard() {
-  const { user } = useAuth();
-  const [stats, setStats] = useState(null);
-  const [recentFeedback, setRecentFeedback] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchDashboardData = async () => {
-    try {
-      if (user?.role === 'manager') {
-        const response = await axios.get('/dashboard/stats');
-        setStats(response.data);
-        setRecentFeedback(response.data.recent_feedback);
-      } else {
-        const response = await axios.get('/feedback');
-        setRecentFeedback(response.data.slice(0, 5));
-      }
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { user } = useAuthStatus();
+  const { stats, loading: dashboardLoading } = useDashboard();
+  const { feedback, loading: feedbackLoading } = useFeedback();
+  const dispatch = useDispatch();
 
   useEffect(() => {
-    fetchDashboardData();
-  }, [user?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (user?.role === 'manager') {
+      dispatch(fetchDashboardStats());
+    } else {
+      dispatch(fetchFeedback());
+    }
+  }, [dispatch, user?.role]);
 
   const getSentimentColor = (sentiment) => {
     switch (sentiment) {
@@ -46,12 +36,14 @@ function Dashboard() {
     });
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-indigo-500"></div>
-      </div>
-    );
+  // Determine loading state and recent feedback based on user role
+  const isLoading = user?.role === 'manager' ? dashboardLoading : feedbackLoading;
+  const recentFeedback = user?.role === 'manager' 
+    ? (stats?.recent_feedback || [])
+    : (feedback?.slice(0, 5) || []);
+
+  if (isLoading) {
+    return <LoadingSpinner message="Loading dashboard..." />;
   }
 
   return (

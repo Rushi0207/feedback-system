@@ -1,5 +1,6 @@
 import { useSelector, useDispatch } from 'react-redux';
 import { useMemo } from 'react';
+import { createSelector } from '@reduxjs/toolkit';
 
 // Typed hooks for better TypeScript support (optional)
 export const useAppDispatch = () => useDispatch();
@@ -65,29 +66,30 @@ export const useAuthStatus = () => {
   }));
 };
 
-export const useFeedbackStats = () => {
-  return useAppSelector((state) => {
-    const feedback = state.feedback.feedback;
-    return {
-      total: feedback.length,
-      acknowledged: feedback.filter(f => f.acknowledged).length,
-      unacknowledged: feedback.filter(f => !f.acknowledged).length,
-      byRole: state.auth.user?.role === 'manager' 
-        ? feedback.reduce((acc, f) => {
-            acc[f.sentiment] = (acc[f.sentiment] || 0) + 1;
-            return acc;
-          }, {})
-        : null,
-    };
-  });
-};
+// Memoized selectors to prevent unnecessary re-renders
+const selectFeedbackStats = createSelector(
+  [(state) => state.feedback.feedback, (state) => state.auth.user],
+  (feedback, user) => ({
+    total: feedback.length,
+    acknowledged: feedback.filter(f => f.acknowledged).length,
+    unacknowledged: feedback.filter(f => !f.acknowledged).length,
+    byRole: user?.role === 'manager' 
+      ? feedback.reduce((acc, f) => {
+          acc[f.sentiment] = (acc[f.sentiment] || 0) + 1;
+          return acc;
+        }, {})
+      : null,
+  })
+);
 
-export const useFilteredFeedback = () => {
-  return useAppSelector((state) => {
-    const { feedback } = state.feedback;
-    const { feedbackFilter, searchQuery } = state.ui;
-    
-    let filtered = feedback;
+const selectFilteredFeedback = createSelector(
+  [
+    (state) => state.feedback.feedback,
+    (state) => state.ui.feedbackFilter,
+    (state) => state.ui.searchQuery
+  ],
+  (feedback, feedbackFilter, searchQuery) => {
+    let filtered = [...feedback];
     
     // Apply sentiment filter
     if (feedbackFilter.sentiment !== 'all') {
@@ -112,7 +114,15 @@ export const useFilteredFeedback = () => {
     }
     
     return filtered;
-  });
+  }
+);
+
+export const useFeedbackStats = () => {
+  return useAppSelector(selectFeedbackStats);
+};
+
+export const useFilteredFeedback = () => {
+  return useAppSelector(selectFilteredFeedback);
 };
 
 export const usePaginatedData = (data) => {

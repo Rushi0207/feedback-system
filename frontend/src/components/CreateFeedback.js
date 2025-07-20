@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
+import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
+import { useAuthStatus, useUsers, useFeedback } from '../store/hooks';
+import { fetchTeamMembers } from '../store/slices/userSlice';
+import { fetchTags, createFeedback } from '../store/slices/feedbackSlice';
+import { addNotification } from '../store/slices/uiSlice';
+import LoadingSpinner from './LoadingSpinner';
 
 function CreateFeedback() {
-  const { user } = useAuth();
+  const { user } = useAuthStatus();
+  const { teamMembers, loading: usersLoading } = useUsers();
+  const { tags, createLoading, tagsLoading } = useFeedback();
+  const dispatch = useDispatch();
   const navigate = useNavigate();
-  const [teamMembers, setTeamMembers] = useState([]);
-  const [tags, setTags] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     employee_id: '',
     strengths: '',
@@ -23,36 +26,26 @@ function CreateFeedback() {
       navigate('/');
       return;
     }
-    fetchData();
-  }, [user, navigate]);
-
-  const fetchData = async () => {
-    try {
-      const [teamResponse, tagsResponse] = await Promise.all([
-        axios.get('/users/team'),
-        axios.get('/tags')
-      ]);
-      setTeamMembers(teamResponse.data);
-      setTags(tagsResponse.data);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    dispatch(fetchTeamMembers());
+    dispatch(fetchTags());
+  }, [dispatch, user?.role, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
 
-    try {
-      await axios.post('/feedback', form);
+    const result = await dispatch(createFeedback(form));
+    
+    if (createFeedback.fulfilled.match(result)) {
+      dispatch(addNotification({
+        type: 'success',
+        message: 'Feedback created successfully!'
+      }));
       navigate('/feedback');
-    } catch (error) {
-      console.error('Error creating feedback:', error);
-      alert('Error creating feedback. Please try again.');
-    } finally {
-      setSubmitting(false);
+    } else {
+      dispatch(addNotification({
+        type: 'error',
+        message: result.payload || 'Error creating feedback. Please try again.'
+      }));
     }
   };
 
@@ -65,12 +58,8 @@ function CreateFeedback() {
     }));
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-indigo-500"></div>
-      </div>
-    );
+  if (usersLoading || tagsLoading) {
+    return <LoadingSpinner message="Loading form data..." />;
   }
 
   return (
@@ -181,10 +170,10 @@ function CreateFeedback() {
             </button>
             <button
               type="submit"
-              disabled={submitting}
+              disabled={createLoading}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-md font-medium disabled:opacity-50"
             >
-              {submitting ? 'Creating...' : 'Create Feedback'}
+              {createLoading ? 'Creating...' : 'Create Feedback'}
             </button>
           </div>
         </form>

@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
+import { useDispatch } from 'react-redux';
+import { useAuthStatus, useUsers } from '../store/hooks';
+import { fetchUsers, fetchManagers, createUser } from '../store/slices/userSlice';
+import { addNotification } from '../store/slices/uiSlice';
 
 function UserManagement() {
-  const { user } = useAuth();
-  const [users, setUsers] = useState([]);
-  const [managers, setManagers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuthStatus();
+  const { users, managers, loading, createLoading, createError } = useUsers();
+  const dispatch = useDispatch();
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [newUser, setNewUser] = useState({
     email: '',
     password: '',
@@ -21,36 +21,21 @@ function UserManagement() {
     if (user?.role !== 'manager') {
       return;
     }
-    fetchData();
-  }, [user]);
-
-  const fetchData = async () => {
-    try {
-      const [usersResponse, managersResponse] = await Promise.all([
-        axios.get('/users'),
-        axios.get('/users/managers')
-      ]);
-      setUsers(usersResponse.data);
-      setManagers(managersResponse.data);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    dispatch(fetchUsers());
+    dispatch(fetchManagers());
+  }, [dispatch, user?.role]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
 
-    try {
-      const userData = {
-        ...newUser,
-        manager_id: newUser.manager_id ? parseInt(newUser.manager_id) : null
-      };
-      
-      const response = await axios.post('/users', userData);
-      setUsers([...users, response.data]);
+    const userData = {
+      ...newUser,
+      manager_id: newUser.manager_id ? parseInt(newUser.manager_id) : null
+    };
+    
+    const result = await dispatch(createUser(userData));
+    
+    if (createUser.fulfilled.match(result)) {
       setNewUser({
         email: '',
         password: '',
@@ -59,12 +44,15 @@ function UserManagement() {
         manager_id: ''
       });
       setShowCreateForm(false);
-      alert('User created successfully! A verification email and welcome email with login credentials have been sent to their email address.');
-    } catch (error) {
-      console.error('Error creating user:', error);
-      alert(error.response?.data?.detail || 'Error creating user. Please try again.');
-    } finally {
-      setSubmitting(false);
+      dispatch(addNotification({
+        type: 'success',
+        message: 'User created successfully! A verification email and welcome email with login credentials have been sent to their email address.'
+      }));
+    } else {
+      dispatch(addNotification({
+        type: 'error',
+        message: result.payload || 'Error creating user. Please try again.'
+      }));
     }
   };
 
@@ -206,10 +194,10 @@ function UserManagement() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={createLoading}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md font-medium disabled:opacity-50"
                 >
-                  {submitting ? 'Creating...' : 'Create User'}
+                  {createLoading ? 'Creating...' : 'Create User'}
                 </button>
               </div>
             </form>
