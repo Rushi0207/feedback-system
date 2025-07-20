@@ -104,6 +104,7 @@ export const apiService = {
     getAll: () => api.get(API_ENDPOINTS.USERS.LIST),
     getTeam: () => api.get(API_ENDPOINTS.USERS.TEAM),
     getManagers: () => api.get(API_ENDPOINTS.USERS.MANAGERS),
+    delete: (id) => api.delete(`/users/${id}`),
   },
   
   // Feedback
@@ -112,6 +113,7 @@ export const apiService = {
     getAll: () => api.get(API_ENDPOINTS.FEEDBACK.LIST),
     update: (id, updateData) => api.put(API_ENDPOINTS.FEEDBACK.UPDATE(id), updateData),
     acknowledge: (id) => api.post(API_ENDPOINTS.FEEDBACK.ACKNOWLEDGE(id)),
+    delete: (id) => api.delete(`/feedback/${id}`),
   },
   
   // Tags

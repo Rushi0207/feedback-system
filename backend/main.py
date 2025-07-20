@@ -9,6 +9,7 @@ import jwt
 import os
 import secrets
 import time
+import threading
 from passlib.context import CryptContext
 from dotenv import load_dotenv
 import database
@@ -19,23 +20,21 @@ from email_service import email_service
 # Load environment variables
 load_dotenv()
 
-# Database retry decorator with session management
-def retry_db_operation_with_new_session(max_retries=3, delay=0.1):
+# Global lock for database operations
+db_lock = threading.Lock()
+
+# Simple retry decorator with global lock
+def retry_db_operation(max_retries=3, delay=0.1):
     def decorator(func):
         def wrapper(*args, **kwargs):
             last_exception = None
             for attempt in range(max_retries):
-                # Create a new database session for each attempt
-                db = database.SessionLocal()
                 try:
-                    result = func(db, *args, **kwargs)
-                    db.close()
-                    return result
+                    with db_lock:  # Use global lock to serialize database operations
+                        return func(*args, **kwargs)
                 except (OperationalError, Exception) as e:
-                    db.rollback()
-                    db.close()
                     last_exception = e
-                    if ("database is locked" in str(e) or "PendingRollbackError" in str(e)) and attempt < max_retries - 1:
+                    if ("database is locked" in str(e) or "timeout" in str(e).lower()) and attempt < max_retries - 1:
                         time.sleep(delay * (2 ** attempt))  # Exponential backoff
                         continue
                     raise e
@@ -247,8 +246,8 @@ async def create_user(user_data: schemas.UserCreate, current_user: models.User =
     verification_token = email_service.generate_verification_token()
     token_expiry = email_service.get_token_expiry()
     
-    @retry_db_operation_with_new_session(max_retries=3, delay=0.1)
-    def create_user_with_retry(fresh_db):
+    @retry_db_operation(max_retries=3, delay=0.1)
+    def create_user_with_retry():
         # Create new user
         db_user = models.User(
             email=user_data.email,
@@ -261,9 +260,9 @@ async def create_user(user_data: schemas.UserCreate, current_user: models.User =
             verification_token_expires=token_expiry
         )
         
-        fresh_db.add(db_user)
-        fresh_db.commit()
-        fresh_db.refresh(db_user)
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
         return db_user
     
     db_user = create_user_with_retry()
@@ -305,6 +304,41 @@ def get_all_users(current_user: models.User = Depends(get_current_user), db: Ses
     users = db.query(models.User).all()
     return users
 
+@app.delete("/users/{user_id}")
+def delete_user(user_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "manager":
+        raise HTTPException(status_code=403, detail="Only managers can delete users")
+    
+    # Find the user to delete
+    user_to_delete = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user_to_delete:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Prevent managers from deleting themselves
+    if user_to_delete.id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    
+    # Prevent deleting users who are not in your team (for employees) or other managers (unless you're admin)
+    if user_to_delete.role == "employee" and user_to_delete.manager_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete employees in your team")
+    
+    @retry_db_operation(max_retries=3, delay=0.1)
+    def delete_user_with_retry():
+        # Delete related feedback first (cascade delete)
+        db.query(models.Feedback).filter(
+            (models.Feedback.manager_id == user_id) | (models.Feedback.employee_id == user_id)
+        ).delete()
+        
+        # Delete related feedback requests
+        db.query(models.FeedbackRequest).filter(models.FeedbackRequest.employee_id == user_id).delete()
+        
+        # Delete the user
+        db.delete(user_to_delete)
+        db.commit()
+        return {"message": f"User {user_to_delete.full_name} deleted successfully"}
+    
+    return delete_user_with_retry()
+
 # Feedback routes
 @app.post("/feedback", response_model=schemas.Feedback)
 def create_feedback(feedback: schemas.FeedbackCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -316,8 +350,8 @@ def create_feedback(feedback: schemas.FeedbackCreate, current_user: models.User 
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found in your team")
     
-    @retry_db_operation_with_new_session(max_retries=3, delay=0.1)
-    def create_feedback_with_retry(fresh_db):
+    @retry_db_operation(max_retries=3, delay=0.1)
+    def create_feedback_with_retry():
         db_feedback = models.Feedback(
             manager_id=current_user.id,
             employee_id=feedback.employee_id,
@@ -325,15 +359,15 @@ def create_feedback(feedback: schemas.FeedbackCreate, current_user: models.User 
             areas_to_improve=feedback.areas_to_improve,
             sentiment=feedback.sentiment
         )
-        fresh_db.add(db_feedback)
-        fresh_db.commit()
-        fresh_db.refresh(db_feedback)
+        db.add(db_feedback)
+        db.commit()
+        db.refresh(db_feedback)
         
         # Add tags if provided
         if feedback.tag_ids:
-            tags = fresh_db.query(models.Tag).filter(models.Tag.id.in_(feedback.tag_ids)).all()
+            tags = db.query(models.Tag).filter(models.Tag.id.in_(feedback.tag_ids)).all()
             db_feedback.tags = tags
-            fresh_db.commit()
+            db.commit()
         
         return db_feedback
     
@@ -360,29 +394,20 @@ def update_feedback(feedback_id: int, feedback_update: schemas.FeedbackUpdate, c
     if not db_feedback:
         raise HTTPException(status_code=404, detail="Feedback not found")
     
-    @retry_db_operation_with_new_session(max_retries=3, delay=0.1)
-    def update_feedback_with_retry(fresh_db):
-        # Re-fetch the feedback in the new session
-        feedback_to_update = fresh_db.query(models.Feedback).filter(
-            models.Feedback.id == feedback_id, 
-            models.Feedback.manager_id == current_user.id
-        ).first()
-        
-        if not feedback_to_update:
-            raise HTTPException(status_code=404, detail="Feedback not found")
-        
+    @retry_db_operation(max_retries=3, delay=0.1)
+    def update_feedback_with_retry():
         update_data = feedback_update.dict(exclude_unset=True)
         for field, value in update_data.items():
             if field != "tag_ids":
-                setattr(feedback_to_update, field, value)
+                setattr(db_feedback, field, value)
         
         if feedback_update.tag_ids is not None:
-            tags = fresh_db.query(models.Tag).filter(models.Tag.id.in_(feedback_update.tag_ids)).all()
-            feedback_to_update.tags = tags
+            tags = db.query(models.Tag).filter(models.Tag.id.in_(feedback_update.tag_ids)).all()
+            db_feedback.tags = tags
         
-        fresh_db.commit()
-        fresh_db.refresh(feedback_to_update)
-        return feedback_to_update
+        db.commit()
+        db.refresh(db_feedback)
+        return db_feedback
     
     return update_feedback_with_retry()
 
@@ -396,23 +421,32 @@ def acknowledge_feedback(feedback_id: int, current_user: models.User = Depends(g
     if not db_feedback:
         raise HTTPException(status_code=404, detail="Feedback not found")
     
-    @retry_db_operation_with_new_session(max_retries=3, delay=0.1)
-    def acknowledge_with_retry(fresh_db):
-        # Re-fetch the feedback in the new session
-        feedback_to_update = fresh_db.query(models.Feedback).filter(
-            models.Feedback.id == feedback_id, 
-            models.Feedback.employee_id == current_user.id
-        ).first()
-        
-        if not feedback_to_update:
-            raise HTTPException(status_code=404, detail="Feedback not found")
-        
-        feedback_to_update.acknowledged = True
-        feedback_to_update.acknowledged_at = datetime.utcnow()
-        fresh_db.commit()
+    @retry_db_operation(max_retries=3, delay=0.1)
+    def acknowledge_with_retry():
+        db_feedback.acknowledged = True
+        db_feedback.acknowledged_at = datetime.utcnow()
+        db.commit()
         return {"message": "Feedback acknowledged"}
     
     return acknowledge_with_retry()
+
+@app.delete("/feedback/{feedback_id}")
+def delete_feedback(feedback_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if current_user.role != "manager":
+        raise HTTPException(status_code=403, detail="Only managers can delete feedback")
+    
+    # Verify feedback exists and belongs to current user
+    db_feedback = db.query(models.Feedback).filter(models.Feedback.id == feedback_id, models.Feedback.manager_id == current_user.id).first()
+    if not db_feedback:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    
+    @retry_db_operation(max_retries=3, delay=0.1)
+    def delete_feedback_with_retry():
+        db.delete(db_feedback)
+        db.commit()
+        return {"message": "Feedback deleted successfully"}
+    
+    return delete_feedback_with_retry()
 
 # Tags routes
 @app.get("/tags", response_model=list[schemas.Tag])
@@ -436,15 +470,15 @@ def create_feedback_request(request: schemas.FeedbackRequestCreate, current_user
     if current_user.role != "employee":
         raise HTTPException(status_code=403, detail="Only employees can request feedback")
     
-    @retry_db_operation_with_new_session(max_retries=3, delay=0.1)
-    def create_request_with_retry(fresh_db):
+    @retry_db_operation(max_retries=3, delay=0.1)
+    def create_request_with_retry():
         db_request = models.FeedbackRequest(
             employee_id=current_user.id,
             message=request.message
         )
-        fresh_db.add(db_request)
-        fresh_db.commit()
-        fresh_db.refresh(db_request)
+        db.add(db_request)
+        db.commit()
+        db.refresh(db_request)
         return db_request
     
     return create_request_with_retry()

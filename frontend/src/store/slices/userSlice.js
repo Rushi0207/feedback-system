@@ -50,6 +50,18 @@ export const createUser = createAsyncThunk(
   }
 );
 
+export const deleteUser = createAsyncThunk(
+  'users/deleteUser',
+  async (userId, { rejectWithValue }) => {
+    try {
+      await apiService.users.delete(userId);
+      return userId;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.detail || 'Failed to delete user');
+    }
+  }
+);
+
 // Initial state
 const initialState = {
   users: [],
@@ -139,6 +151,14 @@ const userSlice = createSlice({
       .addCase(createUser.rejected, (state, action) => {
         state.createLoading = false;
         state.createError = action.payload;
+      })
+      
+      // Delete user
+      .addCase(deleteUser.fulfilled, (state, action) => {
+        const userId = action.payload;
+        state.users = state.users.filter(u => u.id !== userId);
+        state.teamMembers = state.teamMembers.filter(u => u.id !== userId);
+        state.managers = state.managers.filter(u => u.id !== userId);
       });
   },
 });

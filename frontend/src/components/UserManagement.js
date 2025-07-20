@@ -1,8 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { useDispatch } from 'react-redux';
-import { useAuthStatus, useUsers } from '../store/hooks';
-import { fetchUsers, fetchManagers, createUser } from '../store/slices/userSlice';
-import { addNotification } from '../store/slices/uiSlice';
+import React, { useState, useEffect } from "react";
+import { useDispatch } from "react-redux";
+import { useAuthStatus, useUsers } from "../store/hooks";
+import {
+  fetchUsers,
+  fetchManagers,
+  createUser,
+  deleteUser,
+} from "../store/slices/userSlice";
+import { addNotification } from "../store/slices/uiSlice";
 
 function UserManagement() {
   const { user } = useAuthStatus();
@@ -10,15 +15,15 @@ function UserManagement() {
   const dispatch = useDispatch();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newUser, setNewUser] = useState({
-    email: '',
-    password: '',
-    full_name: '',
-    role: 'employee',
-    manager_id: ''
+    email: "",
+    password: "",
+    full_name: "",
+    role: "employee",
+    manager_id: "",
   });
 
   useEffect(() => {
-    if (user?.role !== 'manager') {
+    if (user?.role !== "manager") {
       return;
     }
     dispatch(fetchUsers());
@@ -30,46 +35,79 @@ function UserManagement() {
 
     const userData = {
       ...newUser,
-      manager_id: newUser.manager_id ? parseInt(newUser.manager_id) : null
+      manager_id: newUser.manager_id ? parseInt(newUser.manager_id) : null,
     };
-    
+
     const result = await dispatch(createUser(userData));
-    
+
     if (createUser.fulfilled.match(result)) {
       setNewUser({
-        email: '',
-        password: '',
-        full_name: '',
-        role: 'employee',
-        manager_id: ''
+        email: "",
+        password: "",
+        full_name: "",
+        role: "employee",
+        manager_id: "",
       });
       setShowCreateForm(false);
-      dispatch(addNotification({
-        type: 'success',
-        message: 'User created successfully! A verification email and welcome email with login credentials have been sent to their email address.'
-      }));
+      dispatch(
+        addNotification({
+          type: "success",
+          message:
+            "User created successfully! A verification email and welcome email with login credentials have been sent to their email address.",
+        })
+      );
     } else {
-      dispatch(addNotification({
-        type: 'error',
-        message: result.payload || 'Error creating user. Please try again.'
-      }));
+      dispatch(
+        addNotification({
+          type: "error",
+          message: result.payload || "Error creating user. Please try again.",
+        })
+      );
+    }
+  };
+
+  const handleDeleteUser = async (userId, userName) => {
+    if (
+      window.confirm(
+        `Are you sure you want to delete ${userName}? This will also delete all their feedback and cannot be undone.`
+      )
+    ) {
+      const result = await dispatch(deleteUser(userId));
+
+      if (deleteUser.fulfilled.match(result)) {
+        dispatch(
+          addNotification({
+            type: "success",
+            message: `User ${userName} deleted successfully!`,
+          })
+        );
+      } else {
+        dispatch(
+          addNotification({
+            type: "error",
+            message: result.payload || "Failed to delete user",
+          })
+        );
+      }
     }
   };
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   };
 
-  if (user?.role !== 'manager') {
+  if (user?.role !== "manager") {
     return (
       <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
           <div className="text-center py-12">
-            <p className="text-red-500 text-lg">Access denied. Only managers can manage users.</p>
+            <p className="text-red-500 text-lg">
+              Access denied. Only managers can manage users.
+            </p>
           </div>
         </div>
       </div>
@@ -99,11 +137,16 @@ function UserManagement() {
 
         {showCreateForm && (
           <div className="bg-white shadow-lg rounded-lg p-6 mb-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Create New User</h2>
+            <h2 className="text-lg font-medium text-gray-900 mb-4">
+              Create New User
+            </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="full_name" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    htmlFor="full_name"
+                    className="block text-sm font-medium text-gray-700 mb-2"
+                  >
                     Full Name
                   </label>
                   <input
@@ -111,13 +154,18 @@ function UserManagement() {
                     id="full_name"
                     required
                     value={newUser.full_name}
-                    onChange={(e) => setNewUser({...newUser, full_name: e.target.value})}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, full_name: e.target.value })
+                    }
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                     placeholder="Enter full name"
                   />
                 </div>
                 <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    htmlFor="email"
+                    className="block text-sm font-medium text-gray-700 mb-2"
+                  >
                     Email Address
                   </label>
                   <input
@@ -125,7 +173,9 @@ function UserManagement() {
                     id="email"
                     required
                     value={newUser.email}
-                    onChange={(e) => setNewUser({...newUser, email: e.target.value})}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, email: e.target.value })
+                    }
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                     placeholder="Enter email address"
                   />
@@ -134,7 +184,10 @@ function UserManagement() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    htmlFor="password"
+                    className="block text-sm font-medium text-gray-700 mb-2"
+                  >
                     Password
                   </label>
                   <input
@@ -142,19 +195,26 @@ function UserManagement() {
                     id="password"
                     required
                     value={newUser.password}
-                    onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, password: e.target.value })
+                    }
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                     placeholder="Enter password"
                   />
                 </div>
                 <div>
-                  <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    htmlFor="role"
+                    className="block text-sm font-medium text-gray-700 mb-2"
+                  >
                     Role
                   </label>
                   <select
                     id="role"
                     value={newUser.role}
-                    onChange={(e) => setNewUser({...newUser, role: e.target.value})}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, role: e.target.value })
+                    }
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                   >
                     <option value="employee">Employee</option>
@@ -163,18 +223,25 @@ function UserManagement() {
                 </div>
               </div>
 
-              {newUser.role === 'employee' && (
+              {newUser.role === "employee" && (
                 <div>
-                  <label htmlFor="manager_id" className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    htmlFor="manager_id"
+                    className="block text-sm font-medium text-gray-700 mb-2"
+                  >
                     Manager (Optional - defaults to you)
                   </label>
                   <select
                     id="manager_id"
                     value={newUser.manager_id}
-                    onChange={(e) => setNewUser({...newUser, manager_id: e.target.value})}
+                    onChange={(e) =>
+                      setNewUser({ ...newUser, manager_id: e.target.value })
+                    }
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                   >
-                    <option value="">Select a manager (or leave blank for yourself)</option>
+                    <option value="">
+                      Select a manager (or leave blank for yourself)
+                    </option>
                     {managers.map((manager) => (
                       <option key={manager.id} value={manager.id}>
                         {manager.full_name} ({manager.email})
@@ -197,7 +264,7 @@ function UserManagement() {
                   disabled={createLoading}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md font-medium disabled:opacity-50"
                 >
-                  {createLoading ? 'Creating...' : 'Create User'}
+                  {createLoading ? "Creating..." : "Create User"}
                 </button>
               </div>
             </form>
@@ -233,28 +300,50 @@ function UserManagement() {
                           </p>
                         </div>
                         <div className="flex items-center space-x-4">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            userItem.role === 'manager' 
-                              ? 'bg-purple-100 text-purple-800' 
-                              : 'bg-blue-100 text-blue-800'
-                          }`}>
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              userItem.role === "manager"
+                                ? "bg-purple-100 text-purple-800"
+                                : "bg-blue-100 text-blue-800"
+                            }`}
+                          >
                             {userItem.role}
                           </span>
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            userItem.is_verified 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-red-100 text-red-800'
-                          }`}>
-                            {userItem.is_verified ? '✓ Verified' : '⚠ Unverified'}
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              userItem.is_verified
+                                ? "bg-green-100 text-green-800"
+                                : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {userItem.is_verified
+                              ? "✓ Verified"
+                              : "⚠ Unverified"}
                           </span>
                           {userItem.manager_id && (
                             <span className="text-xs text-gray-500">
-                              Manager: {users.find(u => u.id === userItem.manager_id)?.full_name || 'Unknown'}
+                              Manager:{" "}
+                              {users.find((u) => u.id === userItem.manager_id)
+                                ?.full_name || "Unknown"}
                             </span>
                           )}
                           <span className="text-xs text-gray-500">
                             Joined: {formatDate(userItem.created_at)}
                           </span>
+                          {userItem.id !== user.id && (
+                            <button
+                              onClick={() =>
+                                handleDeleteUser(
+                                  userItem.id,
+                                  userItem.full_name
+                                )
+                              }
+                              className="text-red-600 hover:text-red-900 text-sm font-medium ml-4"
+                              title="Delete User"
+                            >
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -268,8 +357,16 @@ function UserManagement() {
         <div className="mt-8 bg-blue-50 border border-blue-200 rounded-md p-4">
           <div className="flex">
             <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              <svg
+                className="h-5 w-5 text-blue-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                  clipRule="evenodd"
+                />
               </svg>
             </div>
             <div className="ml-3">
@@ -278,12 +375,27 @@ function UserManagement() {
               </h3>
               <div className="mt-2 text-sm text-blue-700">
                 <ul className="list-disc pl-5 space-y-1">
-                  <li>New employees will automatically be assigned to you as their manager if no manager is specified</li>
+                  <li>
+                    New employees will automatically be assigned to you as their
+                    manager if no manager is specified
+                  </li>
                   <li>New managers can manage their own teams independently</li>
-                  <li>All users will receive both a verification email and welcome email with login credentials</li>
-                  <li>Users must verify their email address before they can log in to the system</li>
-                  <li>Users can change their passwords after first login and email verification</li>
-                  <li>Unverified users will see a warning on the login page with option to resend verification</li>
+                  <li>
+                    All users will receive both a verification email and welcome
+                    email with login credentials
+                  </li>
+                  <li>
+                    Users must verify their email address before they can log in
+                    to the system
+                  </li>
+                  <li>
+                    Users can change their passwords after first login and email
+                    verification
+                  </li>
+                  <li>
+                    Unverified users will see a warning on the login page with
+                    option to resend verification
+                  </li>
                 </ul>
               </div>
             </div>

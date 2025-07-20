@@ -98,6 +98,18 @@ export const createFeedbackRequest = createAsyncThunk(
   }
 );
 
+export const deleteFeedback = createAsyncThunk(
+  'feedback/deleteFeedback',
+  async (feedbackId, { rejectWithValue }) => {
+    try {
+      await apiService.feedback.delete(feedbackId);
+      return feedbackId;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.detail || 'Failed to delete feedback');
+    }
+  }
+);
+
 // Initial state
 const initialState = {
   feedback: [],
@@ -256,6 +268,11 @@ const feedbackSlice = createSlice({
       // Create feedback request
       .addCase(createFeedbackRequest.fulfilled, (state, action) => {
         state.feedbackRequests.unshift(action.payload);
+      })
+      
+      // Delete feedback
+      .addCase(deleteFeedback.fulfilled, (state, action) => {
+        state.feedback = state.feedback.filter(f => f.id !== action.payload);
       });
   },
 });

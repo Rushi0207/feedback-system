@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useDispatch } from 'react-redux';
 import { useAuthStatus, useFeedback, useUI } from '../store/hooks';
-import { fetchFeedback, updateFeedback, acknowledgeFeedback, optimisticAcknowledge, rollbackAcknowledge } from '../store/slices/feedbackSlice';
+import { fetchFeedback, updateFeedback, acknowledgeFeedback, optimisticAcknowledge, rollbackAcknowledge, deleteFeedback } from '../store/slices/feedbackSlice';
 import { setEditingFeedback, clearEditingFeedback, updateEditingForm, addNotification } from '../store/slices/uiSlice';
 import ReactMarkdown from 'react-markdown';
 import LoadingSpinner from './LoadingSpinner';
@@ -72,6 +72,24 @@ function FeedbackList() {
     }
   };
 
+  const handleDeleteFeedback = async (feedbackId, employeeName) => {
+    if (window.confirm(`Are you sure you want to delete this feedback for ${employeeName}? This action cannot be undone.`)) {
+      const result = await dispatch(deleteFeedback(feedbackId));
+      
+      if (deleteFeedback.fulfilled.match(result)) {
+        dispatch(addNotification({
+          type: 'success',
+          message: 'Feedback deleted successfully!'
+        }));
+      } else {
+        dispatch(addNotification({
+          type: 'error',
+          message: result.payload || 'Failed to delete feedback'
+        }));
+      }
+    }
+  };
+
   const getSentimentColor = (sentiment) => {
     switch (sentiment) {
       case 'positive': return 'text-green-600 bg-green-100';
@@ -130,12 +148,20 @@ function FeedbackList() {
                         {item.sentiment}
                       </span>
                       {user?.role === 'manager' && (
-                        <button
-                          onClick={() => startEditing(item)}
-                          className="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
-                        >
-                          Edit
-                        </button>
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => startEditing(item)}
+                            className="text-indigo-600 hover:text-indigo-900 text-sm font-medium"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteFeedback(item.id, item.employee.full_name)}
+                            className="text-red-600 hover:text-red-900 text-sm font-medium"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
