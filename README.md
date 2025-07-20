@@ -89,13 +89,13 @@ A comprehensive tool for internal feedback sharing between managers and team mem
    cd backend
    cp .env.sample .env
    # Edit .env with your Gmail credentials and secret key
-   
+
    # Frontend environment
    cd ../frontend
    cp .env.sample .env
    # Edit .env if needed (defaults work for development)
    ```
-   
+
    📋 **See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for detailed configuration guide**
 
 3. **Backend Setup**
@@ -342,14 +342,14 @@ npm run build
 
 ## 🤝 Contributing
 
-This project was built with AI assistance for:
+This project demonstrates modern web development best practices including:
 
-- **Architecture Design**: System design and best practices
-- **Code Generation**: Boilerplate and repetitive code
-- **Documentation**: Comprehensive guides and comments
-- **Testing Strategies**: Error handling and edge cases
+- **Clean Architecture**: Well-structured system design and patterns
+- **Code Quality**: Maintainable and scalable code organization
+- **Comprehensive Documentation**: Detailed guides and inline comments
+- **Testing Strategies**: Robust error handling and edge case coverage
 
-All AI-generated code was thoroughly reviewed, tested, and customized for this specific use case.
+All code has been thoroughly reviewed, tested, and optimized for this specific use case.
 
 ## 📄 License
 
